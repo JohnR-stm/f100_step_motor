@@ -1,0 +1,121 @@
+.project
+.cproject
+*.stackdump
+
+# Object files
+*.o
+*.ko
+*.obj
+*.elf
+
+# Linker output
+*.ilk
+#*.map
+*.exp
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+#*.a
+*.la
+*.lo
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+*.sim
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Kernel Module Compile Results
+*.mod*
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+Mkfile.old
+dkms.conf
+
+### IAREmbeddedWorkBench ###
+# IAR C-STAT and C-RUN
+# Comment this out if you use C-Stat or C-Run to compile/analyze your project
+*.ewt
+
+# IAR Debugger files
+#*.ewd
+
+# IAR Workspace files
+!*.eww
+
+# IAR Settings
+**/settings/*.crun
+**/settings/*.dbgdt
+**/settings/*.cspy
+**/settings/*.cspy.*
+**/settings/*.xcl
+**/settings/*.dni
+**/settings/*.wsdt
+**/settings/*.wspos
+**/settings/*.dnx
+**/settings/*.jlink
+**/settings/*.reggroups
+
+
+# IAR Debug Exe
+**/debug/Exe/
+
+# IAR Debug List
+**/debug/List
+
+# IAR Debug
+**/debug
+
+# IAR Debug
+**/Debug
+
+# IAR Debug Obj
+#**/Obj/*.pbd
+#**/Obj/*.pbd.*
+#**/Obj/*.pbi
+#**/Obj/*.pbi.*
+**/Obj/
+
+# Log files
+**.log
+
+# IAR backup files
+Backup*
+
+# IAR .dep files
+*.dep
+
+# Compiled Binaries
+#*.bin
+
+# Trash files
+*.bak
+
+# CUBEMX folder
+/CUBEMX/*
+!*.ioc
+.vscode/
+.idea/
+cmake-build-debug/
+.DS_Store

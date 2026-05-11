@@ -1,0 +1,20 @@
+C:\ST\IAR\f100_step_motor\iar\Debug\BrowseInfo\main.pbi: \
+  C:\ST\IAR\f100_step_motor\iar\..\project\ST\ll\stm32f1xx_ll_tim.h \
+  C:\ST\IAR\f100_step_motor\iar\..\project\ST\ll\stm32f1xx_ll_gpio.h \
+  C:\ST\IAR\f100_step_motor\iar\..\project\ST\core\system_stm32f1xx.h \
+  C:\Program\ Files\IAR\ Systems\Embedded\ Workbench\ 9.2\arm\inc\c\aarch32\iccarm_builtin.h \
+  C:\ST\IAR\f100_step_motor\iar\..\project\ST\core\cmsis_iccarm.h \
+  C:\ST\IAR\f100_step_motor\iar\..\project\ST\core\cmsis_compiler.h \
+  C:\ST\IAR\f100_step_motor\iar\..\project\ST\core\cmsis_version.h \
+  C:\ST\IAR\f100_step_motor\iar\..\project\ST\core\core_cm3.h \
+  C:\ST\IAR\f100_step_motor\iar\..\project\ST\core\stm32f100xb.h \
+  C:\ST\IAR\f100_step_motor\iar\..\project\ST\core\stm32f1xx.h \
+  C:\ST\IAR\f100_step_motor\iar\..\project\ST\ll\stm32f1xx_ll_bus.h \
+  C:\Program\ Files\IAR\ Systems\Embedded\ Workbench\ 9.2\arm\inc\c\DLib_Product.h \
+  C:\Program\ Files\IAR\ Systems\Embedded\ Workbench\ 9.2\arm\inc\c\DLib_Config_Normal.h \
+  C:\Program\ Files\IAR\ Systems\Embedded\ Workbench\ 9.2\arm\inc\c\DLib_Defaults.h \
+  C:\Program\ Files\IAR\ Systems\Embedded\ Workbench\ 9.2\arm\inc\c\yvals.h \
+  C:\Program\ Files\IAR\ Systems\Embedded\ Workbench\ 9.2\arm\inc\c\ycheck.h \
+  C:\Program\ Files\IAR\ Systems\Embedded\ Workbench\ 9.2\arm\inc\c\stdint.h \
+  C:\ST\IAR\f100_step_motor\iar\..\project\application\system_init.h \
+  C:\ST\IAR\f100_step_motor\project\main.c
