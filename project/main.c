@@ -6,7 +6,7 @@
 #include "system_init.h"
 //#include "uart.h"
 //#include "led_hw.h"
-//#include "app_uart.h"
+
 
 
 //#include "stm32f1xx_ll_rcc.h"
@@ -14,6 +14,10 @@
 #include "stm32f1xx_ll_bus.h"
 #include "stm32f1xx_ll_gpio.h"
 #include "stm32f1xx_ll_tim.h"
+
+
+#include "app_uart.h"
+
 
 //----------------------------------------------------------------------------
 
@@ -33,13 +37,15 @@ int main(void)
   system_clock_config();
   leds_init();
   MX_TIM3_Stepper_Init(1000);
+  uart_init_all();
+    
  
   while (1)
   {
-   system_delay(200);
+   system_delay(100);
    LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_9);
    
-   system_delay(200);
+   system_delay(100);
    LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_8);
    }
 }
@@ -91,7 +97,7 @@ static void MX_TIM3_Stepper_Init(uint16_t initial_arr)
   LL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   // TIMER 3
-  TIM_InitStruct.Prescaler = 15; 
+  TIM_InitStruct.Prescaler = 1500; 
   TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_UP;
   TIM_InitStruct.Autoreload = initial_arr;
   TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
@@ -133,6 +139,7 @@ void TIM3_IRQHandler(void)
     // LL_TIM_OC_SetCompareCH1(TIM3, 0); 
   }
 }
+
 
 
 

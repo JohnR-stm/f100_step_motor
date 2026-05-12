@@ -2182,6 +2182,12 @@
     <group>
         <name>application</name>
         <file>
+            <name>$PROJ_DIR$\..\project\application\app_uart.c</name>
+        </file>
+        <file>
+            <name>$PROJ_DIR$\..\project\application\app_uart.h</name>
+        </file>
+        <file>
             <name>$PROJ_DIR$\..\project\application\system_init.c</name>
         </file>
         <file>

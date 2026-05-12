@@ -6,9 +6,13 @@
 #ifndef _APP_UART_H_
 #define _APP_UART_H_
 
+void uart_init_all(void);
 
 
-void uart1_handler(void);
+
+
+
+
    
 //void init_queue(void);
 

@@ -90,6 +90,9 @@ dkms.conf
 # IAR Debug
 **/Debug
 
+iar/Debug/
+*.ninja_log
+
 # IAR Debug Obj
 #**/Obj/*.pbd
 #**/Obj/*.pbd.*
