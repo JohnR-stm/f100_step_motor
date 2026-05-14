@@ -3,6 +3,11 @@
  * Licensed under the MIT License. See LICENSE file in the project root.
  */
 
+
+#include <string.h>
+#include <stdio.h>
+#include <stdlib.h>
+
 #include "system_init.h"
 //#include "uart.h"
 //#include "led_hw.h"
@@ -24,9 +29,29 @@
 static void leds_init(void);
 static void MX_TIM3_Stepper_Init(uint16_t initial_arr);
 
+static void Execute_Move(uint32_t x, uint32_t v);
+static void Execute_LED(uint8_t state);
+static void exec(void);
+
+
 
 char string_A[] = "Hello, I'm STM32G070! \r\n";
 char string_B[] = "I am glad to see you! \r\n";
+
+
+MainState_t current_state = STATE_WAIT_PC_READY;
+
+volatile uint32_t wait_timeout_ms = 0;
+volatile uint8_t wait_active = 0;
+volatile uint8_t movement_active = 0;
+
+volatile uint16_t cmd_idx = 0;
+volatile uint8_t line_ready = 0; // Flag for 3 algoritm
+
+
+char cmd_buffer[CMD_LINE_SIZE];
+
+Command_t current_cmd = {CMD_NONE, 0, 0, 0, 0};
 
 //----------------------------------------------------------------------------
 // MAIN
@@ -42,11 +67,12 @@ int main(void)
  
   while (1)
   {
-   system_delay(100);
-   LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_9);
+   exec();
+   system_delay(10);
+   //LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_9);
    
-   system_delay(100);
-   LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_8);
+   //system_delay(100);
+   //LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_8);
    }
 }
 
@@ -68,13 +94,6 @@ static void leds_init(void)
   GPIO_InitStruct.Pull = LL_GPIO_PULL_DOWN;           
   LL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 }
-
-
-
-
-
-
-
 
 //----------------------------------------------------------------------------
 // TIMER
@@ -140,6 +159,131 @@ void TIM3_IRQHandler(void)
   }
 }
 
+
+//----------------------------------------------------------------------------
+//System TIMER
+//----------------------------------------------------------------------------
+
+
+
+void SysTick_Timer_Callback(void) {
+    if (wait_active && wait_timeout_ms > 0) {
+        wait_timeout_ms--;
+        if (wait_timeout_ms == 0) {
+            wait_active = 0; // ????? ???????, ???? ???????
+        }
+    }
+}
+
+
+//----------------------------------------------------------------------------
+//  F U N C T I O N S
+//----------------------------------------------------------------------------
+
+
+static void Execute_Move(uint32_t x, uint32_t v) {
+    // ????????? TIM3_CH1, ?????? ?????
+    movement_active = 1; 
+}
+
+
+static void Execute_LED(uint8_t state) {
+    if (state) {
+      //LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_9);
+        LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_9); 
+    } else {
+        LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_9);
+    }
+}
+
+
+//----------------------------------------------------------------------------
+//Execute func
+//----------------------------------------------------------------------------
+
+static void exec(void)
+{
+  switch (current_state) 
+  {
+ //---- S T E P  0 ---------------------------------//
+    case STATE_WAIT_PC_READY: 
+      if (line_ready) 
+      {
+        if (strncmp(cmd_buffer, "Ready", 5) == 0) 
+        {
+          current_state = STATE_REQUEST_CMD;  
+        }
+        cmd_idx = 0;
+        line_ready = 0;
+      }
+    break;
+ //---- S T E P  1 ---------------------------------//
+    case STATE_REQUEST_CMD: 
+      UART_SendString("Read comm \r\n");
+      current_state = STATE_WAIT_CMD;
+    break;
+ //---- S T E P S 2-3 ------------------------------//
+    case STATE_WAIT_CMD: 
+      if (line_ready) 
+      {
+        current_state = STATE_EXECUTE_CMD; 
+      }
+    break;
+ //---- S T E P  4 ---------------------------------//
+    case STATE_EXECUTE_CMD: 
+      cmd_buffer[strcspn(cmd_buffer, "\r\n")] = 0;
+      current_cmd.type = CMD_NONE;
+      if (strncmp(cmd_buffer, "MV ", 3) == 0) 
+      {
+        if (sscanf(cmd_buffer, "MV %ld %ld", &current_cmd.x, &current_cmd.v) == 2) 
+        {
+          current_cmd.type = CMD_MV;
+          Execute_Move(current_cmd.x, current_cmd.v);
+        }
+      }
+      else if (strncmp(cmd_buffer, "LED ", 4) == 0) 
+      {
+        current_cmd.type = CMD_LED;
+        if (strstr(cmd_buffer, "ON"))  current_cmd.led = 1;
+        if (strstr(cmd_buffer, "OFF")) current_cmd.led = 0;
+        Execute_LED(current_cmd.led);
+      }
+      else if (strncmp(cmd_buffer, "WT ", 3) == 0) 
+      {
+        uint32_t seconds = 0;
+        if (sscanf(cmd_buffer, "WT %ld", &seconds) == 1) 
+        {
+          current_cmd.type = CMD_WT;
+          wait_timeout_ms = seconds * 1000;
+          wait_active = 1; // Reset (activate) the wait flag
+        }
+      }
+      else if (strcmp(cmd_buffer, "END") == 0) 
+      {
+        current_cmd.type = CMD_END;
+        current_state = STATE_END; // Step 5: Block item 1 permanently
+        UART_SendString("All commands executed successfully\r\n");
+      }
+      cmd_idx = 0;
+      line_ready = 0;
+      if (current_state != STATE_END) 
+      {
+        current_state = STATE_WAIT_CMD; 
+        while (movement_active || wait_active) 
+        {
+          // Emergency buttons/limit switches can be processed here
+          // The movement_active flag must be cleared in the interrupt
+        }
+        current_state = STATE_REQUEST_CMD; 
+      }
+    break;
+    
+    case STATE_END:
+      // UART_SendString("All commands executed successfully\r\n");
+      //while(1); 
+    break;
+  }
+}
 
 
 

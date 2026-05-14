@@ -4,7 +4,8 @@
  */
 
 #include <stdint.h>
-#include <stdio.h>
+#include <string.h>
+
 
 
 #include "stm32f1xx_ll_bus.h"
@@ -17,14 +18,34 @@
 
 
 
-#define RX_BUF_SIZE 64
+
+
+
+//----------- G L O B A L --------------//
+extern volatile uint16_t cmd_idx;
+extern volatile uint8_t line_ready;
+extern char cmd_buffer[CMD_LINE_SIZE];
+
+//extern  uint32_t wait_timeout_ms;
+//extern uint8_t wait_active;
+
+
 uint8_t rx_dma_buffer[RX_BUF_SIZE]; // for DMA
+
 
 uint32_t last_pos = 0; 
 
 static void Process_And_Send(uint8_t *data, uint32_t len);
+static void Append_To_Line_Buffer(uint8_t* source, uint32_t length);
 
 // static char string1[] = "Hello! I RECEIVED YOUR MESSAGE! \r\n";
+
+
+
+
+
+
+
 
 
 //-----------------------------------------------------------------------------
@@ -125,6 +146,26 @@ static void Process_And_Send(uint8_t *data, uint32_t len) {
 
 
 
+static void Append_To_Line_Buffer(uint8_t* source, uint32_t length) {
+    for (uint32_t i = 0; i < length; i++) 
+    {
+        char ch = source[i];
+        // buffer overflow protection
+        if (cmd_idx < (CMD_LINE_SIZE - 1)) {
+            cmd_buffer[cmd_idx++] = ch;
+        }
+        
+        // End of line found
+        if (ch == '\n' || ch == '\r') {
+            cmd_buffer[cmd_idx] = '\0'; // ????????? ??????
+            line_ready = 1;             // ????????? ??????? ? main
+            //  don't reset cmd_idx here so that main has time to read the data safely
+        }
+    }
+}
+
+
+
 ///--------------------------------------------------------------------------------------
 /*
 void dma_init(void)
@@ -172,13 +213,18 @@ void USART1_IRQHandler(void) {
         
         if (curr_pos != last_pos) {
           if (curr_pos > last_pos) {
-                Process_And_Send(&rx_dma_buffer[last_pos], curr_pos - last_pos);
+                Append_To_Line_Buffer(&rx_dma_buffer[last_pos], curr_pos - last_pos);
+                //Process_And_Send(&rx_dma_buffer[last_pos], curr_pos - last_pos);
             } 
             else {
                 // 1. End of buf
-                Process_And_Send(&rx_dma_buffer[last_pos], RX_BUF_SIZE - last_pos);
+                //Process_And_Send(&rx_dma_buffer[last_pos], RX_BUF_SIZE - last_pos);
                 // 2. begin
-                Process_And_Send(&rx_dma_buffer[0], curr_pos);
+                //Process_And_Send(&rx_dma_buffer[0], curr_pos);
+                Append_To_Line_Buffer(&rx_dma_buffer[last_pos], RX_BUF_SIZE - last_pos);
+                if (curr_pos > 0) {
+                    Append_To_Line_Buffer(&rx_dma_buffer[0], curr_pos);
+                } 
             }
         }
         last_pos = curr_pos; 
@@ -196,6 +242,13 @@ void USART1_IRQHandler(void) {
 //
 //-----------------------------------------------------------------------------
 
+
+void UART_SendString(const char* str) {
+    while (*str) {
+        while (!LL_USART_IsActiveFlag_TXE(USART1));
+        LL_USART_TransmitData8(USART1, *str++);
+    }
+}
 
 //-----------------------------------------------------------------------------
 //
