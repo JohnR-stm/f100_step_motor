@@ -16,6 +16,7 @@ typedef enum {
     STATE_REQUEST_CMD,   // Step 1 send "Read comm \r\n"
     STATE_WAIT_CMD,      // Steps 2-3: waiting for the string
     STATE_EXECUTE_CMD,   // Step 4: Parsing
+    STATE_PROCESSING,    // execute functions
     STATE_END            // Stop
 } MainState_t;
 
@@ -33,8 +34,26 @@ void uart_init_all(void);
 void UART_SendString(const char* str);
 
 
+///-----------------------------------------------------
+
+///--- direction ---///
+typedef enum{
+  DSBL = 0,
+  FORW,
+  REV,
+  ENBL
+} direction_t;
 
 
+
+typedef struct {
+  uint32_t steps_X;
+  uint32_t accelerate_until;
+  uint32_t decelerate_after;
+  direction_t dir_X;  
+} block_t;
+
+///-----------------------------------------------------
 
 
    

@@ -1,4 +1,6 @@
 MV 0 30
+LED ON
+LED OFF
 MV 350 50
 WT 10
 MV 40 50
@@ -21,3 +23,53 @@ LED - управление светодиодом (вызывает функци
 WT t - ждать t секунд (сбрасывается флаг, вызывается функция с системным таймером по истечении времени флаг устанавливается)  
 END - сбрасывает флаг, который не дает послать следующую команду "Read comm \r\n"
   
+current state/ 
+1 ждем команды с компа (STATE_WAIT_PC_READY)
+	если "Ready" пришло переходим в статус запроса команды с пк
+		(STATE_REQUEST_CMD) 
+2 (STATE_REQUEST_CMD) 
+	отправляем разрешение чтения "Read comm" - 
+	   - после этой команды ПК присылает след. строку
+	меняем статус на (STATE_WAIT_CMD)
+3 (STATE_WAIT_CMD)
+	проверяем пришла ли команда с ПК
+	если пришла, меняем статус на (STATE_EXECUTE_CMD)
+4  (STATE_EXECUTE_CMD)
+	парсинг команды и выполнение функций
+		1 Execute_Move(current_cmd.x, current_cmd.v);
+		2 Execute_LED(current_cmd.led);
+		3 wait_active = 1;
+		4 END
+		   current_state = STATE_END;
+		   UART_SendString("All commands executed successfully\r\n");
+	меняем статус на STATE_PROCESSING в каждой функции кроме END
+	После выполнения функций устанавливается статус (STATE_REQUEST_CMD) 
+
+
+
+TIM_KOEFF
+
+steps_X
+dir_X
+accelerate_until
+decelerate_after
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

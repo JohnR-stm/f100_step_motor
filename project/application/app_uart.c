@@ -156,12 +156,14 @@ static void Append_To_Line_Buffer(uint8_t* source, uint32_t length) {
         }
         
         // End of line found
-        if (ch == '\n' || ch == '\r') {
-            cmd_buffer[cmd_idx] = '\0'; // ????????? ??????
-            line_ready = 1;             // ????????? ??????? ? main
+        if (ch == '\n' || ch == '\r') 
+        {
+            cmd_buffer[cmd_idx] = '\0'; 
+            line_ready = 2;             // reset in main
             //  don't reset cmd_idx here so that main has time to read the data safely
         }
     }
+    if (line_ready == 2) line_ready=1;
 }
 
 

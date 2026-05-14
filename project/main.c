@@ -29,11 +29,14 @@
 static void leds_init(void);
 static void MX_TIM3_Stepper_Init(uint16_t initial_arr);
 
-static void Execute_Move(int32_t target_x_mm, int32_t v_mm_s);
+static void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block);
 static void Execute_LED(uint8_t state);
 static void exec(void);
 
+static void SysTick_delay(void);
 
+
+void motor_X_dir(direction_t dir);
 
 char string_A[] = "Hello, I'm STM32G070! \r\n";
 char string_B[] = "I am glad to see you! \r\n";
@@ -55,12 +58,37 @@ Command_t current_cmd = {CMD_NONE, 0, 0, 0, 0};
 
 
 
+//--- motor control ---//
+
+
+
+
 //----------------------------------------------------------------------------
 // STEPPER MOTOR
 //----------------------------------------------------------------------------
+// Number of motor microsteps per 1 mm of linear travel
+#define STEPS_PER_MM      400  
+// TIM3 clock frequency (1 MHz, 1 tick = 1 us)
+#define TIM3_FREQ         1000000   
 
-#define STEPS_PER_MM      400       // Number of motor microsteps per 1 mm of linear travel
-#define TIM3_FREQ         1000000   // TIM3 clock frequency (1 MHz, 1 tick = 1 us)
+#define MIN_SPEED       2.0f
+#define TIM_KOEFF       ((float)2000000.0f)
+
+static float prev_X = 0;
+static int32_t stp_glob_X = 0;
+
+const float min_period = 0.01f;
+const float accel = 100.0f;
+const float accel_rev = 1.0f/(2.0f * 100.0f);
+float period = 0.01f;
+float vel = MIN_SPEED;        /// Start velocity
+
+const float len_stp_x = 0.04f;        //mm/step
+const float stp_len_x = 1.0f / 0.04f; 
+
+
+block_t Block = {0, 0, 0, DSBL};
+
 
 // Physical axis state variables
 volatile int32_t current_pos_steps = 0; // Current position in STEPS relative to zero homing
@@ -75,7 +103,7 @@ volatile int32_t dir_sign = 1;          // Direction vector indicator (+1 for fo
 
 // Speed and period calculation variables
 volatile uint32_t current_period = 0;   // Dynamic ARR value applied to the timer register
-volatile uint32_t min_period = 0;       // Minimum target ARR value corresponding to maximum speed 'v'
+volatile uint32_t min_per = 0;       // Minimum target ARR value corresponding to maximum speed 'v'
 volatile uint32_t accel_step_inc = 0;   // Fixed period step increment value for linear ramp approximation
 
 
@@ -98,6 +126,7 @@ int main(void)
   while (1)
   {
    exec();
+   SysTick_delay();
    system_delay(10);
    //LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_9);
    
@@ -146,7 +175,7 @@ static void MX_TIM3_Stepper_Init(uint16_t initial_arr)
   LL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   // TIMER 3
-  TIM_InitStruct.Prescaler = 1500; 
+  TIM_InitStruct.Prescaler = 16-1; 
   TIM_InitStruct.CounterMode = LL_TIM_COUNTERMODE_UP;
   TIM_InitStruct.Autoreload = initial_arr;
   TIM_InitStruct.ClockDivision = LL_TIM_CLOCKDIVISION_DIV1;
@@ -168,9 +197,21 @@ static void MX_TIM3_Stepper_Init(uint16_t initial_arr)
   NVIC_EnableIRQ(TIM3_IRQn);
   LL_TIM_EnableIT_UPDATE(TIM3); //  (Update)
 
-  LL_TIM_EnableCounter(TIM3);
+  //LL_TIM_EnableCounter(TIM3);
 }
 
+
+
+
+
+
+void motor_X_dir(direction_t dir)
+{
+  if(FORW == dir)
+    LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_8);
+  else
+    LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_8);
+}
 
 
 void TIM3_IRQHandler(void)
@@ -179,44 +220,40 @@ void TIM3_IRQHandler(void)
     {
         LL_TIM_ClearFlag_UPDATE(TIM3);
         
-        if (!movement_active) {
-            LL_TIM_DisableCounter(TIM3);
-            return;
-        }
-        
-        // 1. Increment step tracker and update global physical coordinates
         step_count++;
-        current_pos_steps += dir_sign;
         
-        // 2. Evaluate if current move profile execution is complete
-        if (step_count >= total_steps) {
+        //--- direction ---///
+        motor_X_dir(Block.dir_X);
+        
+        
+        //-- calc speed, period ---///
+        if (step_count < Block.accelerate_until)
+          vel = vel + accel * period;
+        else
+        if (step_count > Block.decelerate_after)
+          vel = vel - accel * period;
+        
+        period = len_stp_x/vel;
+        
+        //--- set timer period ---//
+        LL_TIM_SetAutoReload(TIM3, (uint32_t)(period * TIM_KOEFF));
+        
+        //--- OFF TIMER ---///
+        if (step_count >= Block.steps_X) 
+        {
+          step_count = 0;
+          LL_TIM_DisableCounter(TIM3);
+          LL_TIM_DisableIT_UPDATE(TIM3);
+          movement_active = 0; // Release execution flag to trigger next line fetch in main loop
+          current_state = STATE_REQUEST_CMD;
+          return;
+        }
+        
+        
+         if (!movement_active) {
             LL_TIM_DisableCounter(TIM3);
-            LL_TIM_DisableIT_UPDATE(TIM3);
-            movement_active = 0; // Release execution flag to trigger next line fetch in main loop
             return;
         }
-        
-        // 3. Re-calculate dynamic ARR reload interval for the upcoming step
-        if (step_count < accel_steps) {
-            // ACCELERATION RAMP: decrease step period to increase physical motor speed
-            if (current_period > min_period + accel_step_inc) {
-                current_period -= accel_step_inc;
-            } else {
-                current_period = min_period;
-            }
-        } 
-        else if (step_count >= decel_start_step) {
-            // DECELERATION RAMP: increase step period to smoothly decelerate to zero
-            current_period += accel_step_inc;
-        } 
-        else {
-            // CONSTANT VELOCITY CRUISE PHASE
-            current_period = min_period;
-        }
-        
-        // 4. Commit updated period profiles to the active hardware timer registers
-        LL_TIM_SetAutoReload(TIM3, current_period);
-        LL_TIM_OC_SetCompareCH1(TIM3, current_period / 2); // Maintain 50% square wave duty cycle
     }
 }
 
@@ -226,82 +263,90 @@ void TIM3_IRQHandler(void)
 //----------------------------------------------------------------------------
 
 
+void SysTick_delay(void)
+{
+  if (wait_active && wait_timeout_ms > 0) 
+  {
+    wait_timeout_ms--;
+    if (wait_timeout_ms == 0) {
+      wait_active = 0; // Reset flag
+      current_state = STATE_REQUEST_CMD;
+    }
+  }
+}
 
+/*
 void SysTick_Timer_Callback(void) {
     if (wait_active && wait_timeout_ms > 0) {
         wait_timeout_ms--;
         if (wait_timeout_ms == 0) {
             wait_active = 0; // ????? ???????, ???? ???????
+            current_state = STATE_REQUEST_CMD;
         }
     }
 }
+*/
 
 
 //----------------------------------------------------------------------------
 //  F U N C T I O N S
 //----------------------------------------------------------------------------
+/*
+static float prev_X = 0;
+static int32_t stp_glob_X = 0;
 
+float period = 0.01f;
+float accel = 100.0f;
+float accel_rev = 1.0f/(2.0f * accel);
+float vel = MIN_SPEED;        /// Start velocity
 
-void Execute_Move(int32_t target_x_mm, int32_t v_mm_s) {
-    uint32_t accel_mm_s2 = 100; // Example acceleration profile: 100 mm/s^2
+const float len_stp_x = 0.0185f;        //mm/step
+const float stp_len_x = 1.0f / 0.0185f;        //step/mm
+*/
+
+void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block) 
+{
+  float dX = (float)target_x_mm - prev_X;         //mm
+  
+  ///----- steps, dir X ------------------------------------------------///
+  // calculate delta_X in steps
+  block->steps_X = (uint32_t)fabsf(dX * stp_len_x);
+  // direction_X
+  if(dX > 0){
+    block->dir_X = FORW; 
+    stp_glob_X += (int32_t)block->steps_X;}
+  else {
+    block->dir_X = REV;
+    stp_glob_X -= (int32_t)block->steps_X;}
+  // recalc prev_X
+  if(stp_glob_X < 0) stp_glob_X = 0; 
+  prev_X = (float)stp_glob_X * len_stp_x;
+  
+  ///----- Period ---////
+// min period = const
+ // block->period = steps_koef / block->entry_speed;
+  
+  /// --- accel steps ---///
+  float accel_dist = 0; //mm
+  accel_dist = (float)(nom_speed * nom_speed) * accel_rev;
+  if (accel_dist*2 > dX)
+    accel_dist  = dX/2;
+  block->accelerate_until = (uint32_t)fabsf(accel_dist * stp_len_x);
+  block->decelerate_after = block->steps_X - block->accelerate_until;
+  
+  vel = MIN_SPEED;
+  period = len_stp_x/vel;
+  
+  //start_timer();
+  
+  // Configure and activate TIM3 peripheral registers
+  movement_active = 1;
     
-    // 1. Convert the target position from millimeters to physical steps
-    int32_t target_pos_steps = target_x_mm * STEPS_PER_MM;
+  LL_TIM_SetAutoReload(TIM3, (uint32_t)(period * TIM_KOEFF));
+  //LL_TIM_OC_SetCompareCH1(TIM3, current_period / 2); // Set a stable 50% duty cycle for the stepper driver
     
-    // 2. Calculate linear distance and determine direction vector
-    int32_t distance_steps = target_pos_steps - current_pos_steps;
-    if (distance_steps == 0) {
-        movement_active = 0;
-        return; // Target position reached, skip processing
-    }
-    
-    if (distance_steps > 0) {
-        dir_sign = 1;
-        LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_10); // Forward direction
-    } else {
-        dir_sign = -1;
-        LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_10); // Reverse direction
-        distance_steps = -distance_steps; // Work with absolute value for step processing
-    }
-    
-    total_steps = distance_steps;
-    step_count = 0;
-    
-    // 3. Integer-based calculation of velocity parameters and ARR limits
-    // Max step frequency (Steps/s) = v * STEPS_PER_MM
-    uint32_t max_step_freq = v_mm_s * STEPS_PER_MM;
-    min_period = TIM3_FREQ / max_step_freq; // Minimum ARR required for peak velocity
-    
-    // Calculate steps needed to accelerate to velocity V with acceleration A:
-    // Equation: S_steps = (v_mm_s^2 * STEPS_PER_MM) / (2 * accel_mm_s2)
-    accel_steps = (v_mm_s * v_mm_s * STEPS_PER_MM) / (2 * accel_mm_s2);
-    
-    // Handle short moves where full target velocity cannot be achieved (triangle profile)
-    if (accel_steps * 2 > total_steps) {
-        accel_steps = total_steps / 2;
-    }
-    
-    decel_start_step = total_steps - accel_steps;
-    
-    // Set a safe initial period for near-zero starting velocity (e.g., 20000 ticks = 50 Hz)
-    current_period = 20000; 
-    
-    // Calculate the linear period increment per step for ramp approximation
-    if (accel_steps > 0) {
-        accel_step_inc = (current_period - min_period) / accel_steps;
-    } else {
-        accel_step_inc = 0;
-        current_period = min_period;
-    }
-    
-    // 4. Configure and activate TIM3 peripheral registers
-    movement_active = 1;
-    
-    LL_TIM_SetAutoReload(TIM3, current_period);
-    LL_TIM_OC_SetCompareCH1(TIM3, current_period / 2); // Set a stable 50% duty cycle for the stepper driver
-    
-    LL_TIM_EnableIT_UPDATE(TIM3);
-    LL_TIM_EnableCounter(TIM3);
+  LL_TIM_EnableIT_UPDATE(TIM3);
+  LL_TIM_EnableCounter(TIM3);
 }
 
 
@@ -318,6 +363,7 @@ static void Execute_LED(uint8_t state) {
     } else {
         LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_9);
     }
+    current_state = STATE_REQUEST_CMD;
 }
 
 
@@ -331,7 +377,7 @@ static void exec(void)
   {
  //---- S T E P  0 ---------------------------------//
     case STATE_WAIT_PC_READY: 
-      if (line_ready) 
+      if (line_ready == 1) 
       {
         if (strncmp(cmd_buffer, "Ready", 5) == 0) 
         {
@@ -348,63 +394,70 @@ static void exec(void)
     break;
  //---- S T E P S 2-3 ------------------------------//
     case STATE_WAIT_CMD: 
-      if (line_ready) 
+      if (line_ready == 1) 
       {
         current_state = STATE_EXECUTE_CMD; 
       }
     break;
  //---- S T E P  4 ---------------------------------//
     case STATE_EXECUTE_CMD: 
-      cmd_buffer[strcspn(cmd_buffer, "\r\n")] = 0;
+      cmd_buffer[strcspn(cmd_buffer, "\r\n")] = 0; /// WTF
       current_cmd.type = CMD_NONE;
+      
+      ///--- M O T O R  M O V E  ---///
       if (strncmp(cmd_buffer, "MV ", 3) == 0) 
       {
-        if (sscanf(cmd_buffer, "MV %ld %ld", &current_cmd.x, &current_cmd.v) == 2) 
+        if (sscanf(cmd_buffer, "MV %ld %ld", &current_cmd.x, &current_cmd.v) == 2)  /// WTF
         {
           current_cmd.type = CMD_MV;
-          Execute_Move(current_cmd.x, current_cmd.v);
+          current_state = STATE_PROCESSING;
+          Execute_Move(current_cmd.x, current_cmd.v, &Block);
         }
       }
+      
+      ///--- L E D   O N / O F F  ---///
       else if (strncmp(cmd_buffer, "LED ", 4) == 0) 
       {
         current_cmd.type = CMD_LED;
         if (strstr(cmd_buffer, "ON"))  current_cmd.led = 1;
         if (strstr(cmd_buffer, "OFF")) current_cmd.led = 0;
+        current_state = STATE_PROCESSING;
         Execute_LED(current_cmd.led);
       }
+      
+      ///---  W A I T   ---///
       else if (strncmp(cmd_buffer, "WT ", 3) == 0) 
       {
         uint32_t seconds = 0;
         if (sscanf(cmd_buffer, "WT %ld", &seconds) == 1) 
         {
+          current_state = STATE_PROCESSING;
           current_cmd.type = CMD_WT;
-          wait_timeout_ms = seconds * 1000;
-          wait_active = 1; // Reset (activate) the wait flag
+          wait_timeout_ms = seconds * 100;
+          wait_active = 1; // Set (activate) the wait flag
         }
       }
+      
+      ///--- E N D  -  S T O P  ---///
       else if (strcmp(cmd_buffer, "END") == 0) 
       {
         current_cmd.type = CMD_END;
         current_state = STATE_END; // Step 5: Block item 1 permanently
         UART_SendString("All commands executed successfully\r\n");
       }
+      
+      ///--- r e s e t   a l l  ---///
       cmd_idx = 0;
       line_ready = 0;
-      if (current_state != STATE_END) 
-      {
-        current_state = STATE_WAIT_CMD; 
-        while (movement_active || wait_active) 
-        {
-          // Emergency buttons/limit switches can be processed here
-          // The movement_active flag must be cleared in the interrupt
-        }
-        current_state = STATE_REQUEST_CMD; 
-      }
+
     break;
-    
+ //----  E  N  D   ---------------------------------//   
     case STATE_END:
       // UART_SendString("All commands executed successfully\r\n");
       //while(1); 
+    break;
+    
+    default:
     break;
   }
 }
