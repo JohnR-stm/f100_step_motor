@@ -1,3 +1,4 @@
+Ready
 MV 0 30
 LED ON
 LED OFF
@@ -56,9 +57,70 @@ decelerate_after
 
 
 
+В обработчике прерываний считаем шаги, скорость и период. после завершения выключаем:
+    LL_TIM_ClearFlag_UPDATE(TIM3);
+    if(step_up){
+      step_up = 0;
+      step_count++;
+     //-- calc speed, period ---///
+      if (step_count < Block.accelerate_until)
+        vel = vel + accel * period;
+      else
+      if (step_count > Block.decelerate_after)
+        vel = vel - accel * period; 
+      if(vel < MIN_SPEED)
+        vel = MIN_SPEED;
+      if(vel > MAX_SPEED)
+        vel = MAX_SPEED;
+      period = len_stp_x/vel;
+      //--- set timer period ---//
+      LL_TIM_SetAutoReload(TIM3, (uint32_t)(period * TIM_KOEFF));
+      //--- OFF TIMER ---///
+      if (step_count >= Block.steps_X) {
+        step_count = 0;
+        LL_TIM_DisableCounter(TIM3);
+        //LL_TIM_DisableIT_UPDATE(TIM3);
+        movement_active = 0; // Release execution flag to trigger next line fetch in main loop
+        current_state = STATE_REQUEST_CMD;
+        return;  }
+    }
+    else
+      step_up = 1;
 
-
-
+Обработка инструкции (координата, скорость):
+void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block) 
+{
+  float dX = (float)target_x_mm - prev_X;         //mm
+  ///----- steps, dir X ------------------------------------------------///
+  // calculate delta_X in steps
+  block->steps_X = (uint32_t)fabsf(dX * stp_len_x);
+  // direction_X
+  if(dX > 0){
+    block->dir_X = FORW; 
+    stp_glob_X += (int32_t)block->steps_X;}
+  else {
+    block->dir_X = REV;
+    stp_glob_X -= (int32_t)block->steps_X;}
+  // recalc prev_X
+  if(stp_glob_X < 0) stp_glob_X = 0; 
+  prev_X = (float)stp_glob_X * len_stp_x;
+  motor_X_dir(Block.dir_X);
+  /// --- accel steps ---///
+  float accel_dist = 0; //mm
+  accel_dist = (float)(nom_speed * nom_speed) * accel_rev;
+  if (accel_dist*2 > dX)
+    accel_dist  = dX/2;
+  block->accelerate_until = (uint32_t)fabsf(accel_dist * stp_len_x);
+  block->decelerate_after = block->steps_X - block->accelerate_until; 
+  vel = MIN_SPEED;
+  period = len_stp_x/vel;
+  // Configure and activate TIM3 peripheral registers
+  movement_active = 1;
+    //----  T I M E R   3   S T A R T  ----//
+  LL_TIM_SetAutoReload(TIM3, (uint32_t)(period * TIM_KOEFF));
+  LL_TIM_EnableCounter(TIM3);
+}
+Почему в одну сторону работает правильно, в другую - нет? хотя расстояние (количество шагов) считает правильно
 
 
 

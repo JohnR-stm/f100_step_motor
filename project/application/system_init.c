@@ -58,6 +58,23 @@ void system_clock_config(void)
 //
 //-----------------------------------------------------------------------------
 
+//--- 10 ms --////
+void MX_SysTick_Init(void)
+{
+  LL_SetSystemCoreClock(SYS_FREQ);
+  
+  if (SysTick_Config(SYS_FREQ / 100UL))
+  {
+    while (1);
+  }
+  NVIC_SetPriority(SysTick_IRQn, SYSTICK_PRIO);
+}
+
+//-----------------------------------------------------------------------------
+//
+//-----------------------------------------------------------------------------
+
+
 void nvic_priority_config(void)
 {
   NVIC_SetPriorityGrouping(NVIC_PRIORITYGROUP_4);

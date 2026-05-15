@@ -85,12 +85,13 @@ const float accel_rev = 1.0f/(2.0f * 100.0f);
 float period = 0.01f;
 float vel = MIN_SPEED;        /// Start velocity
 
-const float len_stp_x = 0.04f;        //mm/step
-const float stp_len_x = 1.0f / 0.04f; 
+const float len_stp_x = 0.02f;        //mm/step
+const float stp_len_x = 1.0f / 0.02f; 
 
 
 block_t Block = {0, 0, 0, DSBL};
 
+volatile uint8_t step_up = 0;
 volatile int32_t step_count = 0; 
 volatile uint8_t movement_active = 0;
 
@@ -122,6 +123,8 @@ volatile uint8_t movement_active = 0;
 int main(void)
 {
   system_clock_config();
+  MX_SysTick_Init();
+                  
   leds_init();
   MX_TIM3_Stepper_Init(1000);
   uart_init_all();
@@ -131,7 +134,6 @@ int main(void)
   {
     if (wait_active == 0)
       exec();
-    SysTick_delay();
     system_delay(10);
    //LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_9);
    
@@ -224,50 +226,53 @@ void motor_X_dir(direction_t dir)
 
 void TIM3_IRQHandler(void)
 {
-    if (LL_TIM_IsActiveFlag_UPDATE(TIM3))
+  if (LL_TIM_IsActiveFlag_UPDATE(TIM3))
+  {
+    LL_TIM_ClearFlag_UPDATE(TIM3);
+    if(step_up)
     {
-        LL_TIM_ClearFlag_UPDATE(TIM3);
+      step_up = 0;
+      step_count++;
+      //--- direction ---///
+      // motor_X_dir(Block.dir_X);
+      
+      //-- calc speed, period ---///
+      if (step_count < Block.accelerate_until)
+        vel = vel + accel * period;
+      else
+      if (step_count > Block.decelerate_after)
+        vel = vel - accel * period;
         
-        step_count++;
+      if(vel < MIN_SPEED)
+        vel = MIN_SPEED;
+      if(vel > MAX_SPEED)
+        vel = MAX_SPEED;
         
-        //--- direction ---///
-        motor_X_dir(Block.dir_X);
+      period = len_stp_x/vel;
         
+      //--- set timer period ---//
+      LL_TIM_SetAutoReload(TIM3, (uint32_t)(period * TIM_KOEFF));
         
-        //-- calc speed, period ---///
-        if (step_count < Block.accelerate_until)
-          vel = vel + accel * period;
-        else
-        if (step_count > Block.decelerate_after)
-          vel = vel - accel * period;
+      //--- OFF TIMER ---///
+      if (step_count >= Block.steps_X) 
+      {
+        step_count = 0;
+        LL_TIM_DisableCounter(TIM3);
+        //LL_TIM_DisableIT_UPDATE(TIM3);
+        movement_active = 0; // Release execution flag to trigger next line fetch in main loop
+        current_state = STATE_REQUEST_CMD;
+        return;
+      }
         
-        if(vel < MIN_SPEED)
-          vel = MIN_SPEED;
-        if(vel > MAX_SPEED)
-          vel = MAX_SPEED;
-        
-        period = len_stp_x/vel;
-        
-        //--- set timer period ---//
-        LL_TIM_SetAutoReload(TIM3, (uint32_t)(period * TIM_KOEFF));
-        
-        //--- OFF TIMER ---///
-        if (step_count >= Block.steps_X) 
-        {
-          step_count = 0;
-          LL_TIM_DisableCounter(TIM3);
-          //LL_TIM_DisableIT_UPDATE(TIM3);
-          movement_active = 0; // Release execution flag to trigger next line fetch in main loop
-          current_state = STATE_REQUEST_CMD;
-          return;
-        }
-        
-        
-         if (!movement_active) {
-           // LL_TIM_DisableCounter(TIM3);
-            return;
-        }
+      if (!movement_active) {
+        // LL_TIM_DisableCounter(TIM3);
+         return;
+      }
+      
     }
+    else
+      step_up = 1;
+  }
 }
 
 
@@ -300,6 +305,13 @@ void SysTick_Timer_Callback(void) {
 }
 */
 
+void SysTick_Handler(void)
+{
+
+  SysTick_delay();
+
+}
+
 
 //----------------------------------------------------------------------------
 //  F U N C T I O N S
@@ -324,6 +336,12 @@ void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block)
   ///----- steps, dir X ------------------------------------------------///
   // calculate delta_X in steps
   block->steps_X = (uint32_t)fabsf(dX * stp_len_x);
+  
+  if (block->steps_X == 0) {
+    movement_active = 0;
+    current_state = STATE_REQUEST_CMD;
+    return; }
+  
   // direction_X
   if(dX > 0){
     block->dir_X = FORW; 
@@ -335,11 +353,14 @@ void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block)
   if(stp_glob_X < 0) stp_glob_X = 0; 
   prev_X = (float)stp_glob_X * len_stp_x;
   
+  motor_X_dir(Block.dir_X);
+  
   ///----- Period ---////
 // min period = const
  // block->period = steps_koef / block->entry_speed;
   
   /// --- accel steps ---///
+  dX = fabsf(dX);
   float accel_dist = 0; //mm
   accel_dist = (float)(nom_speed * nom_speed) * accel_rev;
   if (accel_dist*2 > dX)
@@ -348,11 +369,7 @@ void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block)
   block->decelerate_after = block->steps_X - block->accelerate_until;
   
   vel = MIN_SPEED;
-  if(vel < MIN_SPEED)
-    vel = MIN_SPEED;
-  if(vel > MAX_SPEED)
-    vel = MAX_SPEED;
-  
+ 
   period = len_stp_x/vel;
   
   //start_timer();

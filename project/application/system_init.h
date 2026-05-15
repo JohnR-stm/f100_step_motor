@@ -10,6 +10,8 @@
 
 #define SYS_FREQ        16000000
 
+#define SYSTICK_PRIO    3UL
+
 #define PEND_SV_PRIORITY  15
 #define SYS_TICK_PRIORITY 15
 
@@ -33,6 +35,7 @@
 void system_clock_config(void);
 void nvic_priority_config(void);
 void system_delay(uint32_t delay);
+void MX_SysTick_Init(void);
 
 
 
