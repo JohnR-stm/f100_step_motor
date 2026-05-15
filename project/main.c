@@ -28,6 +28,7 @@
 
 static void leds_init(void);
 static void MX_TIM3_Stepper_Init(uint16_t initial_arr);
+static void MX_TIM3_InterruptsEnable(void);
 
 static void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block);
 static void Execute_LED(uint8_t state);
@@ -58,20 +59,21 @@ Command_t current_cmd = {CMD_NONE, 0, 0, 0, 0};
 
 
 
-//--- motor control ---//
-
-
-
-
 //----------------------------------------------------------------------------
 // STEPPER MOTOR
 //----------------------------------------------------------------------------
+//----------------------------------------------------------------------------
+//----  PUL  ---- DIR ----- EN  ------------------------------------------
+//----  PA6 ----- PC8 ----
+//-----------------------------------------------------------------------------
+
 // Number of motor microsteps per 1 mm of linear travel
-#define STEPS_PER_MM      400  
+//#define STEPS_PER_MM      400  
 // TIM3 clock frequency (1 MHz, 1 tick = 1 us)
-#define TIM3_FREQ         1000000   
+//#define TIM3_FREQ         1000000   
 
 #define MIN_SPEED       2.0f
+#define MAX_SPEED       60.0f
 #define TIM_KOEFF       ((float)2000000.0f)
 
 static float prev_X = 0;
@@ -89,22 +91,24 @@ const float stp_len_x = 1.0f / 0.04f;
 
 block_t Block = {0, 0, 0, DSBL};
 
+volatile int32_t step_count = 0; 
+volatile uint8_t movement_active = 0;
 
 // Physical axis state variables
-volatile int32_t current_pos_steps = 0; // Current position in STEPS relative to zero homing
-volatile uint8_t movement_active = 0;   // Axis busy flag (monitored by the parser state machine)
+//volatile int32_t current_pos_steps = 0; // Current position in STEPS relative to zero homing
+//volatile uint8_t movement_active = 0;   // Axis busy flag (monitored by the parser state machine)
 
 // Motion profile parameters for the current command execution
-volatile int32_t total_steps = 0;       // Total steps required for the current movement
-volatile int32_t step_count = 0;        // Step counter tracker (ranges from 0 to total_steps)
-volatile int32_t accel_steps = 0;       // Number of steps allocated for the acceleration phase
-volatile int32_t decel_start_step = 0;  // Step index where deceleration phase must begin
-volatile int32_t dir_sign = 1;          // Direction vector indicator (+1 for forward, -1 for reverse)
+//volatile int32_t total_steps = 0;       // Total steps required for the current movement
+//volatile int32_t step_count = 0;        // Step counter tracker (ranges from 0 to total_steps)
+//volatile int32_t accel_steps = 0;       // Number of steps allocated for the acceleration phase
+//volatile int32_t decel_start_step = 0;  // Step index where deceleration phase must begin
+//volatile int32_t dir_sign = 1;          // Direction vector indicator (+1 for forward, -1 for reverse)
 
 // Speed and period calculation variables
-volatile uint32_t current_period = 0;   // Dynamic ARR value applied to the timer register
-volatile uint32_t min_per = 0;       // Minimum target ARR value corresponding to maximum speed 'v'
-volatile uint32_t accel_step_inc = 0;   // Fixed period step increment value for linear ramp approximation
+//volatile uint32_t current_period = 0;   // Dynamic ARR value applied to the timer register
+//volatile uint32_t min_per = 0;       // Minimum target ARR value corresponding to maximum speed 'v'
+//volatile uint32_t accel_step_inc = 0;   // Fixed period step increment value for linear ramp approximation
 
 
 
@@ -125,9 +129,10 @@ int main(void)
  
   while (1)
   {
-   exec();
-   SysTick_delay();
-   system_delay(10);
+    if (wait_active == 0)
+      exec();
+    SysTick_delay();
+    system_delay(10);
    //LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_9);
    
    //system_delay(100);
@@ -192,14 +197,17 @@ static void MX_TIM3_Stepper_Init(uint16_t initial_arr)
   
   LL_TIM_OC_DisablePreload(TIM3, LL_TIM_CHANNEL_CH1);
 
-  // 5. Interrupts
-  NVIC_SetPriority(TIM3_IRQn, 0); // high priority
-  NVIC_EnableIRQ(TIM3_IRQn);
-  LL_TIM_EnableIT_UPDATE(TIM3); //  (Update)
-
-  //LL_TIM_EnableCounter(TIM3);
+    MX_TIM3_InterruptsEnable(); 
 }
 
+static void MX_TIM3_InterruptsEnable(void)
+{
+  NVIC_SetPriority(TIM3_IRQn, 0); // high priority
+  NVIC_EnableIRQ(TIM3_IRQn);
+  
+  LL_TIM_ClearFlag_UPDATE(TIM3); // clear flag
+  LL_TIM_EnableIT_UPDATE(TIM3);
+}
 
 
 
@@ -233,6 +241,11 @@ void TIM3_IRQHandler(void)
         if (step_count > Block.decelerate_after)
           vel = vel - accel * period;
         
+        if(vel < MIN_SPEED)
+          vel = MIN_SPEED;
+        if(vel > MAX_SPEED)
+          vel = MAX_SPEED;
+        
         period = len_stp_x/vel;
         
         //--- set timer period ---//
@@ -243,7 +256,7 @@ void TIM3_IRQHandler(void)
         {
           step_count = 0;
           LL_TIM_DisableCounter(TIM3);
-          LL_TIM_DisableIT_UPDATE(TIM3);
+          //LL_TIM_DisableIT_UPDATE(TIM3);
           movement_active = 0; // Release execution flag to trigger next line fetch in main loop
           current_state = STATE_REQUEST_CMD;
           return;
@@ -251,7 +264,7 @@ void TIM3_IRQHandler(void)
         
         
          if (!movement_active) {
-            LL_TIM_DisableCounter(TIM3);
+           // LL_TIM_DisableCounter(TIM3);
             return;
         }
     }
@@ -335,17 +348,20 @@ void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block)
   block->decelerate_after = block->steps_X - block->accelerate_until;
   
   vel = MIN_SPEED;
+  if(vel < MIN_SPEED)
+    vel = MIN_SPEED;
+  if(vel > MAX_SPEED)
+    vel = MAX_SPEED;
+  
   period = len_stp_x/vel;
   
   //start_timer();
   
   // Configure and activate TIM3 peripheral registers
   movement_active = 1;
-    
+  
+  //----  T I M E R   3   S T A R T  ----//
   LL_TIM_SetAutoReload(TIM3, (uint32_t)(period * TIM_KOEFF));
-  //LL_TIM_OC_SetCompareCH1(TIM3, current_period / 2); // Set a stable 50% duty cycle for the stepper driver
-    
-  LL_TIM_EnableIT_UPDATE(TIM3);
   LL_TIM_EnableCounter(TIM3);
 }
 

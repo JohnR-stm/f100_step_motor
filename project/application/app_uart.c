@@ -17,6 +17,28 @@
 #include "app_uart.h"
 
 
+//-------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------
+//------ TX  -------  RX  -------------------------------------------------------
+//------ PA9 ------- PA10 -------------------------------------------------------
+//-------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------
+//-------------------------------------------------------------------------------
+//oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo
+//oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo
+//ooooooo ooooooooooooooooooo o ooooooooooo o ooooooooo oo            oooooooooo
+//oooooooo ooooooooooooooooo ooo oooooooooo oo oooooooo oo oooooooooo oooooooooo
+//ooooooooo ooooooooooooooo ooooo ooooooooo ooo ooooooo oo oooooooooo oooooooooo
+//oooooooooo ooooooooooooo ooooooo oooooooo oooo oooooo oo oooooooooo oooooooooo
+//ooooooooooo ooooooooooo ooooooooo ooooooo ooooo ooooo oo oooooooooo oooooooooo
+//oooooooooooo ooooooooo oooo   oooo oooooo oooooo oooo oo oooooooooo oooooooooo
+//ooooooooooooo ooooooo ooooooooooooo ooooo ooooooo ooo oo oooooooooo oooooooooo
+//oooooooooooooo ooooo ooooooooooooooo oooo oooooooo oo oo oooooooooo oooooooooo
+//ooooooooooooooo ooo ooooooooooooooooo ooo ooooooooo o oo oooooooooo oooooooooo
+//oooooooooooooooo o ooooooooooooooooooo oo oooooooooo  oo oooooooooo oooooooooo
+//ooooooooooooooooo ooooooooooooooooooooo o ooooooooooo oo            oooooooooo
+//oooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo
 
 
 
