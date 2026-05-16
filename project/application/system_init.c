@@ -63,7 +63,7 @@ void MX_SysTick_Init(void)
 {
   LL_SetSystemCoreClock(SYS_FREQ);
   
-  if (SysTick_Config(SYS_FREQ / 100UL))
+  if (SysTick_Config(SYS_FREQ / 1000UL))
   {
     while (1);
   }

@@ -23,9 +23,9 @@
 
 if ($debugfile -eq "")
 {
-& "C:\Program Files\IAR Systems\Embedded Workbench 9.2\common\bin\cspybat" -f "C:\IAR workspase\f100_step_motor\iar\settings\f100_step_motor.Debug.general.xcl" --backend -f "C:\IAR workspase\f100_step_motor\iar\settings\f100_step_motor.Debug.driver.xcl" 
+& "C:\Program Files\IAR Systems\Embedded Workbench 9.2\common\bin\cspybat" -f "C:\ST\IAR\f100_step_motor\iar\settings\f100_step_motor.Debug.general.xcl" --backend -f "C:\ST\IAR\f100_step_motor\iar\settings\f100_step_motor.Debug.driver.xcl" 
 }
 else
 {
-& "C:\Program Files\IAR Systems\Embedded Workbench 9.2\common\bin\cspybat" -f "C:\IAR workspase\f100_step_motor\iar\settings\f100_step_motor.Debug.general.xcl" --debug_file=$debugfile --backend -f "C:\IAR workspase\f100_step_motor\iar\settings\f100_step_motor.Debug.driver.xcl" 
+& "C:\Program Files\IAR Systems\Embedded Workbench 9.2\common\bin\cspybat" -f "C:\ST\IAR\f100_step_motor\iar\settings\f100_step_motor.Debug.general.xcl" --debug_file=$debugfile --backend -f "C:\ST\IAR\f100_step_motor\iar\settings\f100_step_motor.Debug.driver.xcl" 
 }

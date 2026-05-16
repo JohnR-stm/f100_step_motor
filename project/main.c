@@ -19,6 +19,7 @@
 #include "stm32f1xx_ll_bus.h"
 #include "stm32f1xx_ll_gpio.h"
 #include "stm32f1xx_ll_tim.h"
+#include "stm32f1xx_ll_exti.h"
 
 
 #include "app_uart.h"
@@ -27,12 +28,17 @@
 //----------------------------------------------------------------------------
 
 static void leds_init(void);
+
+static void Endstop_EXTI_Init(void);
+
 static void MX_TIM3_Stepper_Init(uint16_t initial_arr);
 static void MX_TIM3_InterruptsEnable(void);
 
-static void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block);
+static void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t volatile *block);
 static void Execute_LED(uint8_t state);
 static void exec(void);
+
+static void go_to_zero(void);
 
 static void SysTick_delay(void);
 
@@ -57,14 +63,16 @@ char cmd_buffer[CMD_LINE_SIZE];
 
 Command_t current_cmd = {CMD_NONE, 0, 0, 0, 0};
 
+uint32_t dead_time = 2;
 
+volatile uint8_t zero_sw_flag = 0;
 
 //----------------------------------------------------------------------------
 // STEPPER MOTOR
 //----------------------------------------------------------------------------
 //----------------------------------------------------------------------------
-//----  PUL  ---- DIR ----- EN  ------------------------------------------
-//----  PA6 ----- PC8 ----
+//----  PUL  ---- DIR ----- EN  ------- Limit SW -----------------------------
+//----  PA6 ----- PC8 ----      -------   PC6    -----------------------------
 //-----------------------------------------------------------------------------
 
 // Number of motor microsteps per 1 mm of linear travel
@@ -75,6 +83,7 @@ Command_t current_cmd = {CMD_NONE, 0, 0, 0, 0};
 #define MIN_SPEED       2.0f
 #define MAX_SPEED       60.0f
 #define TIM_KOEFF       ((float)2000000.0f)
+#define MAX_DIST        ((int32_t)890)
 
 static float prev_X = 0;
 static int32_t stp_glob_X = 0;
@@ -82,6 +91,10 @@ static int32_t stp_glob_X = 0;
 const float min_period = 0.01f;
 const float accel = 100.0f;
 const float accel_rev = 1.0f/(2.0f * 100.0f);
+
+const float accel_lim = 500.0f;
+const float accel_rev_lim = 1.0f/(2.0f * 500.0f);
+
 float period = 0.01f;
 float vel = MIN_SPEED;        /// Start velocity
 
@@ -89,7 +102,7 @@ const float len_stp_x = 0.02f;        //mm/step
 const float stp_len_x = 1.0f / 0.02f; 
 
 
-block_t Block = {0, 0, 0, DSBL};
+volatile block_t Block = {0, 0, 0, DSBL};
 
 volatile uint8_t step_up = 0;
 volatile int32_t step_count = 0; 
@@ -124,17 +137,20 @@ int main(void)
 {
   system_clock_config();
   MX_SysTick_Init();
+  
+  Endstop_EXTI_Init();
                   
   leds_init();
   MX_TIM3_Stepper_Init(1000);
   uart_init_all();
+  
     
  
   while (1)
   {
     if (wait_active == 0)
       exec();
-    system_delay(10);
+    system_delay(dead_time);
    //LL_GPIO_TogglePin(GPIOC, LL_GPIO_PIN_9);
    
    //system_delay(100);
@@ -160,6 +176,103 @@ static void leds_init(void)
   GPIO_InitStruct.Pull = LL_GPIO_PULL_DOWN;           
   LL_GPIO_Init(GPIOC, &GPIO_InitStruct);
 }
+
+//----------------------------------------------------------------------------
+// EXTERNAL INTERRUPTS PC6
+//----------------------------------------------------------------------------
+
+
+static void Endstop_EXTI_Init(void)
+{
+  LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_GPIOC);
+  LL_APB2_GRP1_EnableClock(LL_APB2_GRP1_PERIPH_AFIO);
+
+  // 2.  PC6 as input
+  LL_GPIO_InitTypeDef GPIO_InitStruct = {0};
+  GPIO_InitStruct.Pin = LL_GPIO_PIN_6;
+  GPIO_InitStruct.Mode = LL_GPIO_MODE_INPUT;          
+  GPIO_InitStruct.Pull = LL_GPIO_PULL_UP;        // resistor to +3.3V
+  LL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+  // 3.  EXTI6 + GPIOC --- AFIO
+  LL_GPIO_AF_SetEXTISource(LL_GPIO_AF_EXTI_PORTC, LL_GPIO_AF_EXTI_LINE6);
+
+  // 4. tune EXTI6
+  LL_EXTI_InitTypeDef EXTI_InitStruct = {0};
+  EXTI_InitStruct.Line_0_31 = LL_EXTI_LINE_6;
+  EXTI_InitStruct.LineCommand = ENABLE;
+  EXTI_InitStruct.Mode = LL_EXTI_MODE_IT;               // Interrupt regime
+  EXTI_InitStruct.Trigger = LL_EXTI_TRIGGER_RISING_FALLING; // 0 & 1 interrupt
+  LL_EXTI_Init(&EXTI_InitStruct);
+
+  NVIC_SetPriority(EXTI9_5_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0)); // ???????????? ?????????
+  NVIC_EnableIRQ(EXTI9_5_IRQn);
+}
+
+//--- I N T E R R U P T   H A N D L E R  -----------------------
+
+void EXTI9_5_IRQHandler(void)
+{
+  // Is LINE_6 ?
+  if (LL_EXTI_IsActiveFlag_0_31(LL_EXTI_LINE_6) != RESET)
+  {
+    if(zero_sw_flag != 0)
+    {
+      // If PC6 on the VCC
+      if (LL_GPIO_IsInputPinSet(GPIOC, LL_GPIO_PIN_6) == 0)
+      {
+        // stop the timer
+
+        step_count = 0;
+        //movement_active = 0; // Release execution flag to trigger next line fetch in main loop
+        //prev_X = 0.0f; 
+        Block.steps_X = (uint32_t)fabsf(2.0f * stp_len_x); // 1 mm
+        Block.accelerate_until = 1;
+        Block.decelerate_after = 2;
+        zero_sw_flag = 2;
+              
+        // start timer forward
+        //Execute_Move(10, 2, &Block);
+        //LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_9); // test
+      }
+      else
+      {
+        //// If PC6 on the GND
+        // stop timer
+        step_count = 0;
+        LL_TIM_DisableCounter(TIM3);
+        movement_active = 0; // Release execution flag to trigger next line fetch in main loop
+        current_state = STATE_REQUEST_CMD;
+        prev_X = 0.0f;
+        zero_sw_flag = 0;
+        
+        LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_9); // test
+      }
+    }
+
+    // clear flag
+    LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_6);
+  }
+}
+
+//----------------------------------------------------------------------------
+//--- go to zero--------------------------------------------------------------
+//----------------------------------------------------------------------------
+
+static void go_to_zero(void)
+{
+  zero_sw_flag = 1;
+  //enable 0 switch
+      /// if 0 SW activate - recalc steps for stop, then start timer forward while 0 SW !=0
+
+  
+  //start timer rev
+  prev_X = (float)MAX_DIST;
+  Execute_Move(0, 40, &Block); 
+  
+}
+
+
 
 //----------------------------------------------------------------------------
 // TIMER
@@ -202,16 +315,18 @@ static void MX_TIM3_Stepper_Init(uint16_t initial_arr)
     MX_TIM3_InterruptsEnable(); 
 }
 
+//-------- Interrupts Enable -------------------------------------------------
+
 static void MX_TIM3_InterruptsEnable(void)
 {
-  NVIC_SetPriority(TIM3_IRQn, 0); // high priority
+  NVIC_SetPriority(TIM3_IRQn, 1); // priority lower then Switch_0
   NVIC_EnableIRQ(TIM3_IRQn);
   
   LL_TIM_ClearFlag_UPDATE(TIM3); // clear flag
   LL_TIM_EnableIT_UPDATE(TIM3);
 }
 
-
+//------ Motor Direction -----------------------------------------------------
 
 
 
@@ -223,6 +338,8 @@ void motor_X_dir(direction_t dir)
     LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_8);
 }
 
+
+//---- T I M   I N T E R R U P T S   H A N D L E R ---------------------------
 
 void TIM3_IRQHandler(void)
 {
@@ -238,10 +355,20 @@ void TIM3_IRQHandler(void)
       
       //-- calc speed, period ---///
       if (step_count < Block.accelerate_until)
-        vel = vel + accel * period;
+      {
+        if(zero_sw_flag == 0)
+          vel = vel + accel * period;
+        else
+          vel = vel + accel_lim * period;
+      }
       else
       if (step_count > Block.decelerate_after)
-        vel = vel - accel * period;
+      {
+        if(zero_sw_flag == 0)
+          vel = vel - accel * period;
+        else
+          vel = vel - accel_lim * period;
+      }
         
       if(vel < MIN_SPEED)
         vel = MIN_SPEED;
@@ -261,6 +388,14 @@ void TIM3_IRQHandler(void)
         //LL_TIM_DisableIT_UPDATE(TIM3);
         movement_active = 0; // Release execution flag to trigger next line fetch in main loop
         current_state = STATE_REQUEST_CMD;
+        if(zero_sw_flag == 2)
+        {
+          // start timer forward
+          prev_X = 0.0f;
+          Execute_Move(10, 2, &Block);
+          LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_9); // test
+        }
+        
         return;
       }
         
@@ -329,8 +464,14 @@ const float len_stp_x = 0.0185f;        //mm/step
 const float stp_len_x = 1.0f / 0.0185f;        //step/mm
 */
 
-void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block) 
+void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t volatile *block) 
 {
+  if (target_x_mm > MAX_DIST)
+    target_x_mm = MAX_DIST;
+  else 
+    if (target_x_mm < 0)
+      target_x_mm = 0;
+  
   float dX = (float)target_x_mm - prev_X;         //mm
   
   ///----- steps, dir X ------------------------------------------------///
@@ -362,7 +503,11 @@ void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block)
   /// --- accel steps ---///
   dX = fabsf(dX);
   float accel_dist = 0; //mm
-  accel_dist = (float)(nom_speed * nom_speed) * accel_rev;
+  if(zero_sw_flag == 0)
+    accel_dist = (float)(nom_speed * nom_speed) * accel_rev;
+  else
+    accel_dist = (float)(nom_speed * nom_speed) * accel_rev_lim;
+  
   if (accel_dist*2 > dX)
     accel_dist  = dX/2;
   block->accelerate_until = (uint32_t)fabsf(accel_dist * stp_len_x);
@@ -383,8 +528,11 @@ void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t * block)
 }
 
 
+
+
+
 //----------------------------------------------------------------------------
-//  T I M E R
+//  L E D S
 //----------------------------------------------------------------------------
 
 
@@ -401,7 +549,7 @@ static void Execute_LED(uint8_t state) {
 
 
 //----------------------------------------------------------------------------
-//Execute func
+//--- E x e c u t e   f u n c ------------------------------------------------
 //----------------------------------------------------------------------------
 
 static void exec(void)
@@ -416,6 +564,8 @@ static void exec(void)
         {
           current_state = STATE_REQUEST_CMD;  
         }
+        else if (strncmp(cmd_buffer, "Reset", 5) == 0)
+          current_state = STATE_WAIT_PC_READY;
         cmd_idx = 0;
         line_ready = 0;
       }
@@ -466,7 +616,7 @@ static void exec(void)
         {
           current_state = STATE_PROCESSING;
           current_cmd.type = CMD_WT;
-          wait_timeout_ms = seconds * 100;
+          wait_timeout_ms = seconds * 1000;
           wait_active = 1; // Set (activate) the wait flag
         }
       }
@@ -477,7 +627,19 @@ static void exec(void)
         current_cmd.type = CMD_END;
         current_state = STATE_END; // Step 5: Block item 1 permanently
         UART_SendString("All commands executed successfully\r\n");
+        dead_time = 2000;
       }
+      
+      ///--- Move to zero  ---///
+      else if (strncmp(cmd_buffer, "Move 0", 5) == 0)
+      {
+        current_state = STATE_PROCESSING;
+        go_to_zero();
+      }
+      
+      ///--- R E S E T  ---///
+      else if (strncmp(cmd_buffer, "Reset", 5) == 0)
+        current_state = STATE_WAIT_PC_READY;
       
       ///--- r e s e t   a l l  ---///
       cmd_idx = 0;
@@ -488,9 +650,14 @@ static void exec(void)
     case STATE_END:
       // UART_SendString("All commands executed successfully\r\n");
       //while(1); 
+      current_state = STATE_WAIT_PC_READY;
+      dead_time = 2;
     break;
     
     default:
+      if (line_ready == 1)
+        if (strncmp(cmd_buffer, "Reset", 5) == 0)
+          current_state = STATE_WAIT_PC_READY;
     break;
   }
 }
