@@ -89,8 +89,8 @@ static float prev_X = 0;
 static int32_t stp_glob_X = 0;
 
 const float min_period = 0.01f;
-const float accel = 100.0f;
-const float accel_rev = 1.0f/(2.0f * 100.0f);
+const float accel = 200.0f;
+const float accel_rev = 1.0f/(2.0f * 200.0f);
 
 const float accel_lim = 500.0f;
 const float accel_rev_lim = 1.0f/(2.0f * 500.0f);
@@ -98,8 +98,8 @@ const float accel_rev_lim = 1.0f/(2.0f * 500.0f);
 float period = 0.01f;
 float vel = MIN_SPEED;        /// Start velocity
 
-const float len_stp_x = 0.02f;        //mm/step
-const float stp_len_x = 1.0f / 0.02f; 
+const float len_stp_x = 0.03927f;        //mm/step
+const float stp_len_x = 1.0f / 0.03927f; 
 
 
 volatile block_t Block = {0, 0, 0, DSBL};
@@ -205,7 +205,7 @@ static void Endstop_EXTI_Init(void)
   EXTI_InitStruct.Trigger = LL_EXTI_TRIGGER_RISING_FALLING; // 0 & 1 interrupt
   LL_EXTI_Init(&EXTI_InitStruct);
 
-  NVIC_SetPriority(EXTI9_5_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0)); // ???????????? ?????????
+  NVIC_SetPriority(EXTI9_5_IRQn, NVIC_EncodePriority(NVIC_GetPriorityGrouping(), 0, 0)); 
   NVIC_EnableIRQ(EXTI9_5_IRQn);
 }
 
@@ -216,26 +216,32 @@ void EXTI9_5_IRQHandler(void)
   // Is LINE_6 ?
   if (LL_EXTI_IsActiveFlag_0_31(LL_EXTI_LINE_6) != RESET)
   {
-    if(zero_sw_flag != 0)
-    {
+
       // If PC6 on the VCC
-      if (LL_GPIO_IsInputPinSet(GPIOC, LL_GPIO_PIN_6) == 0)
+      if (LL_GPIO_IsInputPinSet(GPIOC, LL_GPIO_PIN_6) == 0
+          &&
+          zero_sw_flag == 1)
       {
         // stop the timer
 
         step_count = 0;
         //movement_active = 0; // Release execution flag to trigger next line fetch in main loop
         //prev_X = 0.0f; 
+        zero_sw_flag = 2;
+        //speed braking
         Block.steps_X = (uint32_t)fabsf(2.0f * stp_len_x); // 1 mm
         Block.accelerate_until = 1;
         Block.decelerate_after = 2;
-        zero_sw_flag = 2;
+        
               
         // start timer forward
         //Execute_Move(10, 2, &Block);
         //LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_9); // test
       }
       else
+      if (LL_GPIO_IsInputPinSet(GPIOC, LL_GPIO_PIN_6) == 1
+          &&
+          zero_sw_flag == 3)
       {
         //// If PC6 on the GND
         // stop timer
@@ -248,7 +254,7 @@ void EXTI9_5_IRQHandler(void)
         
         LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_9); // test
       }
-    }
+
 
     // clear flag
     LL_EXTI_ClearFlag_0_31(LL_EXTI_LINE_6);
@@ -387,13 +393,16 @@ void TIM3_IRQHandler(void)
         LL_TIM_DisableCounter(TIM3);
         //LL_TIM_DisableIT_UPDATE(TIM3);
         movement_active = 0; // Release execution flag to trigger next line fetch in main loop
-        current_state = STATE_REQUEST_CMD;
+        if(zero_sw_flag == 0)
+          current_state = STATE_REQUEST_CMD;
+        else
         if(zero_sw_flag == 2)
         {
           // start timer forward
+          zero_sw_flag = 3;
           prev_X = 0.0f;
-          Execute_Move(10, 2, &Block);
-          LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_9); // test
+          Execute_Move(30, 3, &Block);
+          LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_9); // test 
         }
         
         return;
