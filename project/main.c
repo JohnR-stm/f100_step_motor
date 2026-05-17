@@ -80,17 +80,17 @@ volatile uint8_t zero_sw_flag = 0;
 // TIM3 clock frequency (1 MHz, 1 tick = 1 us)
 //#define TIM3_FREQ         1000000   
 
-#define MIN_SPEED       2.0f
+#define MIN_SPEED       4.0f
 #define MAX_SPEED       60.0f
-#define TIM_KOEFF       ((float)2000000.0f)
-#define MAX_DIST        ((int32_t)890)
+#define TIM_KOEFF       ((float)500000.0f)
+#define MAX_DIST        ((int32_t)880)
 
-static float prev_X = 0;
-static int32_t stp_glob_X = 0;
+static volatile float prev_X = 0;
+static volatile int32_t stp_glob_X = 0;
 
 const float min_period = 0.01f;
-const float accel = 200.0f;
-const float accel_rev = 1.0f/(2.0f * 200.0f);
+const float accel = 100.0f;
+const float accel_rev = 1.0f/(2.0f * 100.0f);
 
 const float accel_lim = 500.0f;
 const float accel_rev_lim = 1.0f/(2.0f * 500.0f);
@@ -98,8 +98,8 @@ const float accel_rev_lim = 1.0f/(2.0f * 500.0f);
 float period = 0.01f;
 float vel = MIN_SPEED;        /// Start velocity
 
-const float len_stp_x = 0.03927f;        //mm/step
-const float stp_len_x = 1.0f / 0.03927f; 
+const float len_stp_x = 0.03753f;        //mm/step 0.0373065f;
+const float stp_len_x = 1.0f / 0.03753f; 
 
 
 volatile block_t Block = {0, 0, 0, DSBL};
@@ -229,7 +229,7 @@ void EXTI9_5_IRQHandler(void)
         //prev_X = 0.0f; 
         zero_sw_flag = 2;
         //speed braking
-        Block.steps_X = (uint32_t)fabsf(2.0f * stp_len_x); // 1 mm
+        Block.steps_X = (uint32_t)fabsf(1.2f * stp_len_x); // 1 mm
         Block.accelerate_until = 1;
         Block.decelerate_after = 2;
         
@@ -248,11 +248,13 @@ void EXTI9_5_IRQHandler(void)
         step_count = 0;
         LL_TIM_DisableCounter(TIM3);
         movement_active = 0; // Release execution flag to trigger next line fetch in main loop
-        current_state = STATE_REQUEST_CMD;
-        prev_X = 0.0f;
-        zero_sw_flag = 0;
         
+        prev_X = 0.0f;
+        stp_glob_X = 0;
+        zero_sw_flag = 0;        
         LL_GPIO_ResetOutputPin(GPIOC, LL_GPIO_PIN_9); // test
+        
+        current_state = STATE_REQUEST_CMD;
       }
 
 
@@ -274,7 +276,7 @@ static void go_to_zero(void)
   
   //start timer rev
   prev_X = (float)MAX_DIST;
-  Execute_Move(0, 40, &Block); 
+  Execute_Move(0, 25, &Block); 
   
 }
 
@@ -378,7 +380,7 @@ void TIM3_IRQHandler(void)
         
       if(vel < MIN_SPEED)
         vel = MIN_SPEED;
-      if(vel > MAX_SPEED)
+      else if(vel > MAX_SPEED)
         vel = MAX_SPEED;
         
       period = len_stp_x/vel;
@@ -401,6 +403,7 @@ void TIM3_IRQHandler(void)
           // start timer forward
           zero_sw_flag = 3;
           prev_X = 0.0f;
+          stp_glob_X = 0;
           Execute_Move(30, 3, &Block);
           LL_GPIO_SetOutputPin(GPIOC, LL_GPIO_PIN_9); // test 
         }
@@ -475,12 +478,20 @@ const float stp_len_x = 1.0f / 0.0185f;        //step/mm
 
 void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t volatile *block) 
 {
+  //--- speed limits ---//
+  if(nom_speed < (int32_t)MIN_SPEED)
+    nom_speed = (int32_t)MIN_SPEED;
+  else if(nom_speed > (int32_t)MAX_SPEED)
+    nom_speed = (int32_t)MAX_SPEED;
+
+  //--- dist limits ---//
   if (target_x_mm > MAX_DIST)
     target_x_mm = MAX_DIST;
   else 
     if (target_x_mm < 0)
       target_x_mm = 0;
   
+ 
   float dX = (float)target_x_mm - prev_X;         //mm
   
   ///----- steps, dir X ------------------------------------------------///
@@ -502,7 +513,7 @@ void Execute_Move(int32_t target_x_mm, int32_t nom_speed, block_t volatile *bloc
   // recalc prev_X
   if(stp_glob_X < 0) stp_glob_X = 0; 
   prev_X = (float)stp_glob_X * len_stp_x;
-  
+  // set direction
   motor_X_dir(Block.dir_X);
   
   ///----- Period ---////
